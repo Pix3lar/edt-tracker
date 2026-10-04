@@ -1,0 +1,71 @@
+name: Suivi EDT
+
+on:
+  schedule:
+    # Toutes les 2 h de 5h07 à 21h07, heure de Martinique (UTC-4) → en UTC : 9h07 … 23h07 et 1h07
+    - cron: "7 1,9-23/2 * * *"
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "run = suivi normal · setup = vérifier la configuration · demo = exemple fictif"
+        type: choice
+        options: [run, setup, demo]
+        default: run
+
+permissions:
+  contents: read
+  actions: write   # uniquement pour garder le workflow actif (voir dernière étape)
+
+concurrency:
+  group: suivi-edt
+  cancel-in-progress: false
+
+jobs:
+  suivi:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      MODE: ${{ inputs.mode || 'run' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Installer les dépendances
+        run: pip install -r requirements.txt
+
+      # La mémoire (dernière version connue de l'EDT) est gardée dans le cache
+      # GitHub Actions : elle n'est pas visible publiquement, contrairement au code.
+      - name: Récupérer la mémoire
+        uses: actions/cache/restore@v4
+        with:
+          path: state
+          key: edt-state-${{ github.run_id }}
+          restore-keys: edt-state-
+
+      - name: Lancer le suivi
+        env:
+          ICS_URL: ${{ secrets.ICS_URL }}
+          DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_BOT_TOKEN }}
+          DISCORD_USER_ID: ${{ secrets.DISCORD_USER_ID }}
+          DISCORD_LOG_CHANNEL_ID: ${{ secrets.DISCORD_LOG_CHANNEL_ID }}
+          LOG_QUIET_RUNS: ${{ vars.LOG_QUIET_RUNS || 'true' }}
+        run: python -m edt_bot "$MODE"
+
+      - name: Sauvegarder la mémoire
+        if: always() && env.MODE == 'run' && hashFiles('state/state.json') != ''
+        uses: actions/cache/save@v4
+        with:
+          path: state
+          key: edt-state-${{ github.run_id }}-${{ github.run_attempt }}
+
+      # GitHub met en pause les tâches planifiées d'un dépôt public après 60 jours
+      # sans activité. Réactiver le workflow via l'API remet ce compteur à zéro.
+      - name: Garder le workflow actif
+        if: always() && github.event_name == 'schedule'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api -X PUT "repos/${{ github.repository }}/actions/workflows/edt.yml/enable" || true
