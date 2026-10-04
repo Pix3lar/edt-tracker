@@ -1,4 +1,4 @@
-# 📅 Suivi d'emploi du temps — B2 INFO Martinique
+# 📅 Suivi d'emploi du temps
 
 Programme qui surveille ton emploi du temps Hyperplanning et te prévient sur Discord :
 
